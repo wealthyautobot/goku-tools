@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Box Coordinate Tool</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent2: #22c55e;
+      --danger: #ef4444;
+      --border: rgba(255,255,255,.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #1e3a8a 0, transparent 32rem), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(15, 23, 42, .92);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 18px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .brand { font-weight: 800; letter-spacing: -.02em; margin-right: auto; }
+    .brand span { color: var(--accent); }
+    input[type=file] { max-width: 260px; }
+    button, label.filebtn {
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #334155, #1f2937);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 650;
+      font-size: 14px;
+    }
+    button:hover, label.filebtn:hover { border-color: rgba(56,189,248,.7); }
+    button.primary { background: linear-gradient(180deg, #0284c7, #0369a1); }
+    button.success { background: linear-gradient(180deg, #16a34a, #15803d); }
+    button.danger { background: linear-gradient(180deg, #dc2626, #991b1b); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .wrap { display: grid; grid-template-columns: 1fr 340px; gap: 18px; padding: 18px; align-items: start; }
+    .viewer { display: flex; flex-direction: column; gap: 22px; align-items: center; }
+    .page-card {
+      width: fit-content;
+      max-width: 100%;
+      background: rgba(17,24,39,.72);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.28);
+    }
+    .page-title { display:flex; justify-content:space-between; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .canvas-wrap { position: relative; line-height: 0; overflow: hidden; border-radius: 10px; background: white; }
+    canvas.pdf-page { display: block; max-width: 100%; height: auto; }
+    svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+    .box { fill: rgba(56, 189, 248, .18); stroke: #0ea5e9; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: move; }
+    .box.selected { fill: rgba(34,197,94,.20); stroke: #22c55e; }
+    .draft { fill: rgba(251,191,36,.16); stroke: #fbbf24; stroke-width: 2; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; }
+    aside {
+      position: sticky;
+      top: 78px;
+      background: rgba(17,24,39,.82);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.22);
+    }
+    .hint { color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .stats { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+    .stat { background: var(--panel2); border: 1px solid var(--border); padding: 10px; border-radius: 12px; }
+    .stat b { display:block; font-size: 20px; color: white; }
+    .controls { display:flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    textarea {
+      width: 100%; min-height: 260px; resize: vertical;
+      background: #020617; color: #d1d5db; border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    }
+    .field { margin: 14px 0 4px; }
+    .field label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .field input {
+      width: 100%;
+      background: #020617;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 11px;
+      font-size: 14px;
+      outline: none;
+    }
+    .field input:focus { border-color: rgba(56,189,248,.8); box-shadow: 0 0 0 3px rgba(56,189,248,.12); }
+    .field input:disabled { opacity: .55; cursor: not-allowed; }
+    .box-label {
+      fill: #fff;
+      stroke: rgba(0,0,0,.65);
+      stroke-width: 3px;
+      paint-order: stroke;
+      font: 700 12px Inter, ui-sans-serif, system-ui, sans-serif;
+      pointer-events: none;
+      user-select: none;
+    }
+    .empty { margin: 8vh auto; text-align:center; color: var(--muted); max-width: 560px; padding: 30px; border: 1px dashed var(--border); border-radius: 18px; background: rgba(17,24,39,.5); }
+    .small { font-size: 12px; color: var(--muted); }
+    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } aside { position: static; } header { align-items: stretch; } .brand { width:100%; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">PDF <span>Box Coordinate</span> Tool</div>
+    <label class="filebtn">Select PDF <input id="file" type="file" accept="application/pdf" hidden /></label>
+    <button id="zoomOut" disabled>− Zoom</button>
+    <button id="zoomIn" disabled>+ Zoom</button>
+    <button id="download" class="success" disabled>Download JSON</button>
+  </header>
+
+  <main class="wrap">
+    <section id="viewer" class="viewer">
+      <div class="empty">
+        <h2>Pick a PDF to start</h2>
+        <p>Each page renders below. Drag on any page to draw boxes. Coordinates are stored per page in PDF coordinate space.</p>
+      </div>
+    </section>
+
+    <aside>
+      <div class="hint">
+        <b>How it works</b><br />
+        • Drag on PDF to draw a box<br />
+        • Drag a box to move it<br />
+        • Click a box to select it<br />
+        • Double-click a box to rename it<br />
+        • Add/edit custom name for selected box<br />
+        • Press Delete/Backspace to remove selected box<br />
+        • Export gives page-wise JSON coordinates with names<br /><br />
+        Coordinate origin is <b>top-left</b> of the PDF page. Values are normalized to the PDF’s native page dimensions, so they remain valid independent of zoom/render size.
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="small">Pages</span><b id="pageCount">0</b></div>
+        <div class="stat"><span class="small">Boxes</span><b id="boxCount">0</b></div>
+      </div>
+      <div class="field">
+        <label for="boxName">Selected box name</label>
+        <input id="boxName" type="text" placeholder="Select a box to name it" disabled />
+      </div>
+      <div class="controls">
+        <button id="copy" disabled>Copy JSON</button>
+        <button id="clearSelected" class="danger" disabled>Delete selected</button>
+        <button id="clearAll" class="danger" disabled>Clear all</button>
+      </div>
+      <textarea id="json" readonly placeholder="Coordinates JSON will appear here..."></textarea>
+    </aside>
+  </main>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const fileInput = document.getElementById('file');
+    const viewer = document.getElementById('viewer');
+    const jsonEl = document.getElementById('json');
+    const pageCountEl = document.getElementById('pageCount');
+    const boxCountEl = document.getElementById('boxCount');
+    const downloadBtn = document.getElementById('download');
+    const copyBtn = document.getElementById('copy');
+    const clearAllBtn = document.getElementById('clearAll');
+    const clearSelectedBtn = document.getElementById('clearSelected');
+    const zoomInBtn = document.getElementById('zoomIn');
+    const zoomOutBtn = document.getElementById('zoomOut');
+    const boxNameInput = document.getElementById('boxName');
+
+    let pdfDoc = null;
+    let fileName = 'document.pdf';
+    let scale = 1.35;
+    let boxes = {}; // { pageNumber: [{ id,name,x,y,width,height,pageWidth,pageHeight }] }
+    let selected = null; // { pageNumber, id }
+    let pageMeta = {}; // { pageNumber: { width, height, renderWidth, renderHeight } }
+
+    function uid() { return 'box_' + Math.random().toString(36).slice(2, 10); }
+    function totalBoxes() { return Object.values(boxes).reduce((n, arr) => n + arr.length, 0); }
+    function round(n) { return Math.round(n * 100) / 100; }
+    function getSelectedBox() {
+      if (!selected) return null;
+      return (boxes[selected.pageNumber] || []).find(b => b.id === selected.id) || null;
+    }
+
+    function exportPayload() {
+      const pages = {};
+      Object.keys(boxes).sort((a,b)=>Number(a)-Number(b)).forEach(page => {
+        pages[page] = boxes[page].map((b, i) => ({
+          id: b.id,
+          name: b.name || '',
+          index: i + 1,
+          x: round(b.x),
+          y: round(b.y),
+          width: round(b.width),
+          height: round(b.height),
+          x2: round(b.x + b.width),
+          y2: round(b.y + b.height),
+          pageWidth: round(b.pageWidth),
+          pageHeight: round(b.pageHeight)
+        }));
+      });
+      return { fileName, generatedAt: new Date().toISOString(), coordinateOrigin: 'top-left', pages };
+    }
+
+    function refreshJson() {
+      const payload = exportPayload();
+      jsonEl.value = JSON.stringify(payload, null, 2);
+      pageCountEl.textContent = pdfDoc ? pdfDoc.numPages : 0;
+      boxCountEl.textContent = totalBoxes();
+      const hasPdf = !!pdfDoc;
+      const hasBoxes = totalBoxes() > 0;
+      downloadBtn.disabled = !hasPdf;
+      copyBtn.disabled = !hasPdf;
+      clearAllBtn.disabled = !hasBoxes;
+      const selectedBox = getSelectedBox();
+      clearSelectedBtn.disabled = !selectedBox;
+      boxNameInput.disabled = !selectedBox;
+      boxNameInput.placeholder = selectedBox ? 'Enter name for selected box' : 'Select a box to name it';
+      if (document.activeElement !== boxNameInput) boxNameInput.value = selectedBox ? (selectedBox.name || '') : '';
+      zoomInBtn.disabled = !hasPdf;
+      zoomOutBtn.disabled = !hasPdf;
+    }
+
+    function canvasPoint(evt, svg) {
+      const r = svg.getBoundingClientRect();
+      return { x: evt.clientX - r.left, y: evt.clientY - r.top, w: r.width, h: r.height };
+    }
+
+    function renameBox(box) {
+      const nextName = prompt('Enter name for this box', box.name || '');
+      if (nextName === null) return;
+      box.name = nextName.trim();
+      document.querySelectorAll('svg.overlay').forEach(s => renderBoxes(Number(s.dataset.page), s));
+      refreshJson();
+      boxNameInput.focus();
+    }
+
+    function renderBoxes(pageNumber, svg) {
+      svg.querySelectorAll('rect.box, text.box-label').forEach(el => el.remove());
+      const meta = pageMeta[pageNumber];
+      (boxes[pageNumber] || []).forEach((b, i) => {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        let drag = null;
+
+        function setVisual() {
+          const rx = b.x / meta.width * meta.renderWidth;
+          const ry = b.y / meta.height * meta.renderHeight;
+          rect.setAttribute('x', rx);
+          rect.setAttribute('y', ry);
+          rect.setAttribute('width', b.width / meta.width * meta.renderWidth);
+          rect.setAttribute('height', b.height / meta.height * meta.renderHeight);
+          label.setAttribute('x', rx + 6);
+          label.setAttribute('y', ry + 16);
+          label.textContent = b.name || `Box ${i + 1}`;
+        }
+
+        rect.classList.add('box');
+        if (selected && selected.pageNumber === pageNumber && selected.id === b.id) rect.classList.add('selected');
+        rect.dataset.id = b.id;
+        setVisual();
+
+        rect.addEventListener('pointerdown', e => {
+          e.stopPropagation();
+          e.preventDefault();
+          selected = { pageNumber, id: b.id };
+          document.querySelectorAll('rect.box').forEach(el => el.classList.remove('selected'));
+          rect.classList.add('selected');
+          const p = canvasPoint(e, svg);
+          drag = { pointerId: e.pointerId, startX: p.x, startY: p.y, originalX: b.x, originalY: b.y, moved: false };
+          rect.setPointerCapture(e.pointerId);
+          refreshJson();
+        });
+
+        rect.addEventListener('pointermove', e => {
+          if (!drag || drag.pointerId !== e.pointerId) return;
+          e.stopPropagation();
+          e.preventDefault();
+          const p = canvasPoint(e, svg);
+          const dx = (p.x - drag.startX) / meta.renderWidth * meta.width;
+          const dy = (p.y - drag.startY) / meta.renderHeight * meta.height;
+          if (Math.abs(p.x - drag.startX) > 2 || Math.abs(p.y - drag.startY) > 2) drag.moved = true;
+          b.x = Math.max(0, Math.min(meta.width - b.width, drag.originalX + dx));
+          b.y = Math.max(0, Math.min(meta.height - b.height, drag.originalY + dy));
+          setVisual();
+          refreshJson();
+        });
+
+        rect.addEventListener('pointerup', e => {
+          if (!drag || drag.pointerId !== e.pointerId) return;
+          e.stopPropagation();
+          e.preventDefault();
+          rect.releasePointerCapture(e.pointerId);
+          drag = null;
+          refreshJson();
+        });
+
+        rect.addEventListener('pointercancel', () => { drag = null; });
+
+        rect.addEventListener('dblclick', e => {
+          e.stopPropagation();
+          e.preventDefault();
+          selected = { pageNumber, id: b.id };
+          renameBox(b);
+        });
+
+        svg.appendChild(rect);
+        label.classList.add('box-label');
+        svg.appendChild(label);
+        setVisual();
+      });
+    }
+
+    function attachDrawing(svg, pageNumber) {
+      let start = null;
+      let draft = null;
+
+      svg.addEventListener('pointerdown', evt => {
+        if (evt.target !== svg) return;
+        selected = null;
+        const p = canvasPoint(evt, svg);
+        start = p;
+        svg.setPointerCapture(evt.pointerId);
+        draft = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        draft.classList.add('draft');
+        draft.setAttribute('x', p.x);
+        draft.setAttribute('y', p.y);
+        draft.setAttribute('width', 0);
+        draft.setAttribute('height', 0);
+        svg.appendChild(draft);
+        refreshJson();
+      });
+
+      svg.addEventListener('pointermove', evt => {
+        if (!start || !draft) return;
+        const p = canvasPoint(evt, svg);
+        const x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
+        const w = Math.abs(start.x - p.x), h = Math.abs(start.y - p.y);
+        draft.setAttribute('x', x);
+        draft.setAttribute('y', y);
+        draft.setAttribute('width', w);
+        draft.setAttribute('height', h);
+      });
+
+      svg.addEventListener('pointerup', evt => {
+        if (!start || !draft) return;
+        const p = canvasPoint(evt, svg);
+        const x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
+        const w = Math.abs(start.x - p.x), h = Math.abs(start.y - p.y);
+        draft.remove();
+        draft = null;
+        start = null;
+        if (w > 4 && h > 4) {
+          const meta = pageMeta[pageNumber];
+          const box = {
+            id: uid(),
+            name: `Box ${(boxes[pageNumber] || []).length + 1}`,
+            x: x / meta.renderWidth * meta.width,
+            y: y / meta.renderHeight * meta.height,
+            width: w / meta.renderWidth * meta.width,
+            height: h / meta.renderHeight * meta.height,
+            pageWidth: meta.width,
+            pageHeight: meta.height
+          };
+          boxes[pageNumber] = boxes[pageNumber] || [];
+          boxes[pageNumber].push(box);
+          selected = { pageNumber, id: box.id };
+        }
+        document.querySelectorAll('svg.overlay').forEach(s => renderBoxes(Number(s.dataset.page), s));
+        refreshJson();
+      });
+    }
+
+    async function renderPdf() {
+      viewer.innerHTML = '';
+      selected = null;
+      pageMeta = {};
+      for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
+        const page = await pdfDoc.getPage(pageNumber);
+        const viewport = page.getViewport({ scale });
+        const native = page.getViewport({ scale: 1 });
+
+        const card = document.createElement('div');
+        card.className = 'page-card';
+        const title = document.createElement('div');
+        title.className = 'page-title';
+        title.innerHTML = `<span>Page ${pageNumber}</span><span>${Math.round(native.width)} × ${Math.round(native.height)}</span>`;
+        const wrap = document.createElement('div');
+        wrap.className = 'canvas-wrap';
+        wrap.style.width = viewport.width + 'px';
+        wrap.style.height = viewport.height + 'px';
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'pdf-page';
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('overlay');
+        svg.dataset.page = String(pageNumber);
+        svg.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+        svg.setAttribute('preserveAspectRatio', 'none');
+
+        pageMeta[pageNumber] = { width: native.width, height: native.height, renderWidth: viewport.width, renderHeight: viewport.height };
+
+        wrap.appendChild(canvas);
+        wrap.appendChild(svg);
+        card.appendChild(title);
+        card.appendChild(wrap);
+        viewer.appendChild(card);
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        attachDrawing(svg, pageNumber);
+        renderBoxes(pageNumber, svg);
+      }
+      refreshJson();
+    }
+
+    fileInput.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      fileName = file.name;
+      boxes = {};
+      selected = null;
+      const data = await file.arrayBuffer();
+      pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+      await renderPdf();
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(exportPayload(), null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName.replace(/\.pdf$/i, '') + '-coordinates.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(jsonEl.value);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => copyBtn.textContent = 'Copy JSON', 900);
+    });
+
+    clearAllBtn.addEventListener('click', () => {
+      if (!confirm('Clear all boxes?')) return;
+      boxes = {};
+      selected = null;
+      document.querySelectorAll('svg.overlay').forEach(s => renderBoxes(Number(s.dataset.page), s));
+      refreshJson();
+    });
+
+    function deleteSelected() {
+      if (!selected) return;
+      boxes[selected.pageNumber] = (boxes[selected.pageNumber] || []).filter(b => b.id !== selected.id);
+      selected = null;
+      document.querySelectorAll('svg.overlay').forEach(s => renderBoxes(Number(s.dataset.page), s));
+      refreshJson();
+    }
+    clearSelectedBtn.addEventListener('click', deleteSelected);
+    boxNameInput.addEventListener('input', () => {
+      const selectedBox = getSelectedBox();
+      if (!selectedBox) return;
+      selectedBox.name = boxNameInput.value;
+      document.querySelectorAll('svg.overlay').forEach(s => renderBoxes(Number(s.dataset.page), s));
+      refreshJson();
+    });
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected && document.activeElement !== jsonEl) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    });
+
+    zoomInBtn.addEventListener('click', async () => { scale = Math.min(2.5, scale + .15); await renderPdf(); });
+    zoomOutBtn.addEventListener('click', async () => { scale = Math.max(.6, scale - .15); await renderPdf(); });
+
+    refreshJson();
+  </script>
+</body>
+</html>
